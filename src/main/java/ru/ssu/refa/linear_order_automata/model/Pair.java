@@ -7,29 +7,13 @@ import lombok.Getter;
 @Getter
 @EqualsAndHashCode
 @AllArgsConstructor
-public class Pair<T extends Comparable<T>> implements Comparable<Pair<T>> {
+public class Pair<T extends Orderable> {
 
     private final T left;
     private final T right;
 
     public Pair<T> getRevertedPair() {
-        return new Pair<T>(right, left);
-    }
-
-    @Override
-    public int compareTo(Pair<T> o) {
-        int leftPart = left.compareTo(o.getLeft());
-        int rightPart = right.compareTo(o.getRight());
-
-        if (leftPart == rightPart) {
-            return leftPart;
-        }
-
-        if (leftPart == 0) {
-            return rightPart;
-        }
-
-        return leftPart;
+        return new Pair<>(right, left);
     }
 
     @Override

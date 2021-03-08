@@ -11,6 +11,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
+import static java.util.Comparator.comparingInt;
+
 @Slf4j
 @Service
 public class AutomataUtilsService implements IAutomataUtilsService {
@@ -43,12 +45,12 @@ public class AutomataUtilsService implements IAutomataUtilsService {
             for (Pair<State> pair : new ArrayList<>(orbit)) {
                 if (!consideredPairs.contains(pair)) {
                     for (InputSignal inputSignal : automaton.getInputSignals()) {
-                        log.debug("pair - {}, inputSignal - {}", pair, inputSignal);
+                        log.trace("pair - {}, inputSignal - {}", pair, inputSignal);
                         Pair<State> nextPair = new Pair<>(
                                 automaton.getTargetState(pair.getLeft(), inputSignal),
                                 automaton.getTargetState(pair.getRight(), inputSignal)
                         );
-                        log.debug("nextPair - {}", nextPair);
+                        log.trace("nextPair - {}", nextPair);
                         if (!isPairFine(nextPair, orbit)) {
                             continue;
                         }
@@ -58,14 +60,15 @@ public class AutomataUtilsService implements IAutomataUtilsService {
 
                         continueIterating = true;
                         orbit.add(nextPair);
-                        log.debug("added next pair {} to orbit", nextPair);
+                        log.trace("added next pair {} to orbit", nextPair);
                         if (orbitCache.containsKey(nextPair)) {
+                            log.trace("adding pairs from cache for pair {}", nextPair);
                             for (Pair<State> cachedPair : orbitCache.get(nextPair).getTransitionOrbit()) {
                                 if (orbit.contains(cachedPair.getRevertedPair())) {
                                     handleSymmetricPair(cachedPair, inputPair);
                                 }
                                 orbit.add(cachedPair);
-                                log.debug("added cached pair {} to orbit", cachedPair);
+                                log.trace("added cached pair {} to orbit", cachedPair);
                             }
 
                             consideredPairs.add(nextPair);
@@ -77,18 +80,23 @@ public class AutomataUtilsService implements IAutomataUtilsService {
             }
         } while (continueIterating);
 
+        log.debug("getTransitionOrbit: inputPair - {}, result - {}", inputPair, orbit);
         return orbit;
     }
 
     @Override
     public Set<Pair<OutputSignal>> getOutputOrbit(Automaton automaton, Set<Pair<State>> transitionOrbit) throws SymmetricRelationException {
+        log.debug("getOutputOrbit: transitionOrbit - {}", transitionOrbit);
+
         Set<Pair<OutputSignal>> orbit = new HashSet<>();
         for (Pair<State> pair : transitionOrbit) {
             for (InputSignal inputSignal : automaton.getInputSignals()) {
+                log.trace("pair - {}, inputSignal - {}", pair, inputSignal);
                 Pair<OutputSignal> outputPair = new Pair<>(
                         automaton.getOutputSignal(pair.getLeft(), inputSignal),
                         automaton.getOutputSignal(pair.getRight(), inputSignal)
                 );
+                log.trace("outputPair - {}", outputPair);
                 if (outputPair.getLeft() == null || outputPair.getRight() == null) {
                     continue;
                 }
@@ -98,10 +106,12 @@ public class AutomataUtilsService implements IAutomataUtilsService {
 
                 if (!outputPair.getLeft().equals(outputPair.getRight())) {
                     orbit.add(outputPair);
+                    log.trace("added pair {} to orbit", outputPair);
                 }
             }
         }
 
+        log.debug("getOutputOrbit: transitionOrbit - {}, result - {}", transitionOrbit, orbit);
         return orbit;
     }
 
@@ -116,6 +126,7 @@ public class AutomataUtilsService implements IAutomataUtilsService {
                         result.put(pair, new Orbit(transitionOrbit, outputOrbit));
                     }));
         } catch (RuntimeSymmetricRelationException e) {
+            log.error("Found symmetric pair during orbit calculation: " + e.getMessage(), e);
             throw new SymmetricRelationException(e.getCause());
         }
 
@@ -123,46 +134,66 @@ public class AutomataUtilsService implements IAutomataUtilsService {
     }
 
     @Override
-    public <T extends Comparable<T>> Set<Pair<T>> getTransitiveClosure(Set<Pair<T>> relation, Collection<T> elements) throws SymmetricRelationException {
-        log.trace("getTransitiveClosure: relation = {}, elements = {}", relation, elements);
+    public <T extends Orderable> Set<Pair<T>> getTransitiveClosure(Set<Pair<T>> relation, Collection<T> elements) throws SymmetricRelationException {
+        log.debug("getTransitiveClosure: relation - {}, elements - {}", relation, elements);
+
         Map<T, Set<T>> adjacencyMap = new HashMap<>();
         for (Pair<T> pair : relation) {
             adjacencyMap.computeIfAbsent(pair.getLeft(), v -> new HashSet<>());
             adjacencyMap.get(pair.getLeft()).add(pair.getRight());
         }
-        log.trace("getTransitiveClosure: adjacencyMap = {}", adjacencyMap);
+        log.trace("adjacencyMap - {}", adjacencyMap);
 
         Map<T, Set<T>> transitiveClosureMap = new HashMap<>();
         elements.forEach(t -> transitiveClosureMap.computeIfAbsent(t, v -> new HashSet<>()));
         for (T t : elements) {
             dfsTransitive(t, t, adjacencyMap, transitiveClosureMap);
         }
-        log.trace("getTransitiveClosure: transitiveClosureMap = {}", transitiveClosureMap);
+        log.trace("transitiveClosureMap - {}", transitiveClosureMap);
 
         Set<Pair<T>> transitivelyClosedSet = new HashSet<>();
         for (Map.Entry<T, Set<T>> entry : transitiveClosureMap.entrySet()) {
             entry.getValue().forEach(t -> transitivelyClosedSet.add(new Pair<>(entry.getKey(), t)));
         }
+
+        log.debug("getTransitiveClosure: relation - {}, result - {}", relation, transitivelyClosedSet);
         return transitivelyClosedSet;
     }
 
     @Override
-    public <T extends Comparable<T>> boolean isOrderConstructed(Set<Pair<T>> relation, int totalCount) {
+    public <T extends Orderable> boolean isOrderConstructed(Set<Pair<T>> relation, int totalCount) {
+        log.debug("isOrderConstructed: relation - {}, totalCount - {}", relation, totalCount);
         return (totalCount * totalCount + totalCount) / 2 == relation.size();
     }
 
     @Override
-    public <T extends Comparable<T>> Set<Pair<T>> revertRelation(Set<Pair<T>> relation) {
+    public <T extends Orderable> Set<Pair<T>> revertRelation(Set<Pair<T>> relation) {
         return relation.stream()
                 .map(Pair::getRevertedPair)
                 .collect(Collectors.toSet());
     }
 
-    private <T extends Comparable<T>> void dfsTransitive(T from, T to,
-                                                         Map<T, Set<T>> adjacencyMap, Map<T, Set<T>> transitiveClosureMap) throws SymmetricRelationException {
+    @Override
+    public <T extends Orderable> Set<Pair<T>> doTopologicalSort(Set<Pair<T>> relation) {
+        // todo: implement using DFS
+        return relation;
+    }
+
+    @Override
+    public <T extends Orderable> List<T> findLinkage(Set<Pair<T>> order) {
+        Map<T, List<Pair<T>>> orderMap = order.stream()
+                .collect(Collectors.groupingBy(Pair::getLeft));
+        return orderMap.keySet().stream()
+                .sorted(comparingInt(t -> orderMap.get(t).size()).reversed())
+                .collect(Collectors.toList());
+    }
+
+    private <T extends Orderable> void dfsTransitive(T from, T to,
+                                                     Map<T, Set<T>> adjacencyMap, Map<T, Set<T>> transitiveClosureMap) throws SymmetricRelationException {
         log.trace("dfsUtil: from = {}, to = {}", from, to);
         if (!from.equals(to) && transitiveClosureMap.get(to).contains(from)) {
-            throw new SymmetricRelationException();
+            throw new SymmetricRelationException("Found symmetric pair for pair (" + from + ", " + to
+                    + ") during transitive closure calculation");
         }
         transitiveClosureMap.get(from).add(to);
         if (adjacencyMap.containsKey(to)) {
@@ -171,18 +202,6 @@ public class AutomataUtilsService implements IAutomataUtilsService {
                     dfsTransitive(from, nextTo, adjacencyMap, transitiveClosureMap);
                 }
             }
-        }
-    }
-
-    private void dfsConnectedComponents(State state, Map<State, Set<State>> adjacencyMap,
-                                        List<State> component, Set<State> visited) {
-        component.add(state);
-        visited.add(state);
-        if (adjacencyMap.containsKey(state)) {
-            adjacencyMap.get(state)
-                    .stream()
-                    .filter(nextState -> !visited.contains(nextState))
-                    .forEach(nextState -> dfsConnectedComponents(nextState, adjacencyMap, component, visited));
         }
     }
 
@@ -200,7 +219,7 @@ public class AutomataUtilsService implements IAutomataUtilsService {
         if (inputPair != null) {
             message += " (inputPair - " + inputPair + ")";
         }
-        log.error("getTransitionOrbit: {}", message);
+        log.error("Property of antisymmetry is violated. {}", message);
         throw new SymmetricRelationException(message);
     }
 

@@ -24,83 +24,105 @@ public class AutomataOrderingService implements IAutomataOrderingService {
 
     @Override
     public LinearOrder orderAutomaton(Automaton automaton) {
+        log.debug("orderAutomaton: automaton - {}", automaton);
+
         List<Pair<State>> allStatePairs = automataUtilsService.findAllStatePairs(automaton.getStates());
-        log.debug("allStatePairs: {}", allStatePairs);
+        log.trace("allStatePairs - {}", allStatePairs);
 
         Map<Pair<State>, Orbit> orbits;
         try {
             orbits = automataUtilsService.getOrbits(automaton, allStatePairs);
-            log.debug("orbits: {}", orbits);
+            log.trace("orbits - {}", orbits);
         } catch (SymmetricRelationException e) {
-            log.error("found symmetric pair during calculation of orbits: " + e.getMessage(), e);
-            return new LinearOrder(false, e.getMessage());
+            log.error("Found symmetric pair during calculation of orbits: " + e.getMessage(), e);
+
+            LinearOrder linearOrder = new LinearOrder(false,
+                    "The property of antisymmetry is violated on the step of orbits calculation");
+            log.debug("orderAutomaton: result - {}", linearOrder);
+            return linearOrder;
         }
 
         List<Pair<State>> sortedStatePairs = sortPairsByOrbitPower(orbits);
-        log.debug("sortedStatePairs: {}", sortedStatePairs);
+        log.trace("sortedStatePairs - {}", sortedStatePairs);
 
         Set<Pair<State>> wRelation = new HashSet<>();
         automaton.getStates().forEach(state -> wRelation.add(new Pair<>(state, state)));
-
         Set<Pair<OutputSignal>> w1Relation = new HashSet<>();
         automaton.getOutputSignals().forEach(outputSignal -> w1Relation.add(new Pair<>(outputSignal, outputSignal)));
+        log.trace("w and w1 are initialized: w - {}, w1 - {}", wRelation, w1Relation);
 
+        int stepNo = 0;
         Deque<Step> steps = new LinkedList<>();
         steps.push(new Step(wRelation, w1Relation));
+        log.trace("[{}] - stack is initiated", stepNo++);
 
         Pair<State> currentPair;
         while (true) {
             Step previousStep = steps.peek();
-            log.debug("previousStep = {}", previousStep);
+            log.trace("previousStep - {}", previousStep);
+
+            // previousStep mayn't be null here, so we can skip an assertion
             if (automataUtilsService.isOrderConstructed(previousStep.wRelation, automaton.getStates().size())) {
-                LinearOrder linearOrder = new LinearOrder(previousStep.wRelation, previousStep.w1Relation);
-                log.debug("result = {}", linearOrder);
+                Set<Pair<OutputSignal>> linearOrderOnOutputSignalSet = automataUtilsService.doTopologicalSort(previousStep.w1Relation);
+                LinearOrder linearOrder = new LinearOrder(previousStep.wRelation, linearOrderOnOutputSignalSet);
+                log.debug("orderAutomaton: result - {}", linearOrder);
+
+                List<State> linkage = automataUtilsService.findLinkage(previousStep.wRelation);
                 return linearOrder;
             }
 
             Optional<Pair<State>> nextPair = selectNextPair(sortedStatePairs, previousStep.wRelation);
             if (nextPair.isEmpty()) {
-                LinearOrder linearOrder = new LinearOrder(false, "Can't select next pair");
-                log.debug("result = {}", linearOrder);
+                LinearOrder linearOrder = new LinearOrder(false, "Can't select next pair for order construction");
+                log.debug("orderAutomaton: result - {}", linearOrder);
                 return linearOrder;
             }
             currentPair = nextPair.get();
-            log.debug("currentPair = {}", currentPair);
+            log.trace("currentPair - {}", currentPair);
 
             try {
-                Order order = tryToAddOrbits(previousStep, automaton, orbits.get(currentPair).getTransitionOrbit(),
+                Order partialOrder = tryToAddOrbits(previousStep, automaton, orbits.get(currentPair).getTransitionOrbit(),
                         orbits.get(currentPair).getOutputOrbit(), false);
-                log.debug("order = {}", order);
-                if (!order.isPairReverted()) {
-                    steps.push(new Step(currentPair, false, order.getWRelation(), order.getW1Relation()));
+                log.trace("partialOrder - {}", partialOrder);
+                if (!partialOrder.isPairReverted()) {
+                    steps.push(new Step(currentPair, false, partialOrder.getWRelation(), partialOrder.getW1Relation()));
+                    log.trace("[{}] - added straight pair {} to stack", stepNo++, currentPair);
                 } else {
-                    steps.push(new Step(currentPair.getRevertedPair(), true, order.getWRelation(), order.getW1Relation()));
+                    Pair<State> currentRevertedPair = currentPair.getRevertedPair();
+                    steps.push(new Step(currentRevertedPair, true, partialOrder.getWRelation(), partialOrder.getW1Relation()));
+                    log.trace("[{}] - added reverted pair {} to stack", stepNo++, currentRevertedPair);
                 }
             } catch (SymmetricRelationException e) {
-                log.error("back iteration");
+                log.trace("Straight and reverted pair {} violates antisymmetry -> roll back", currentPair);
+
                 while (true) {
+                    // initial step has isReverted = false, so we can skip an assertion
                     while (steps.peek().isReverted) {
-                        log.debug("remove");
                         steps.pop();
+                        log.trace("[{}] - removed pair {} from stack", stepNo++, currentPair);
                     }
 
                     if (steps.peek().currentPair == null) {
-                        LinearOrder linearOrder = new LinearOrder(false, "Back to the root of stack");
-                        log.debug("result = {}", linearOrder);
+                        LinearOrder linearOrder = new LinearOrder(false,
+                                "Rolled back to the root of stack, all options violate antisymmetry");
+                        log.debug("orderAutomaton: result - {}", linearOrder);
                         return linearOrder;
                     }
 
-                    Step revertedStep = steps.pop();
-                    Pair<State> pairOfRevertedStep = revertedStep.currentPair;
+                    Step stepToRevert = steps.pop();
+                    log.trace("stepToRevert - {}", stepToRevert);
+                    Pair<State> pairOfStepToRevert = stepToRevert.currentPair;
                     try {
-                        Order order = tryToAddOrbits(steps.peek(), automaton, automataUtilsService.revertRelation(orbits.get(pairOfRevertedStep)
-                                .getTransitionOrbit()), automataUtilsService.revertRelation(orbits.get(pairOfRevertedStep)
-                                .getOutputOrbit()), true);
-                        steps.push(new Step(pairOfRevertedStep.getRevertedPair(), true, order.getWRelation(), order.getW1Relation()));
+                        Order partialOrder = tryToAddOrbits(steps.peek(), automaton,
+                                automataUtilsService.revertRelation(orbits.get(pairOfStepToRevert).getTransitionOrbit()),
+                                automataUtilsService.revertRelation(orbits.get(pairOfStepToRevert).getOutputOrbit()),
+                                true
+                        );
+                        log.trace("partialOrder - {}", partialOrder);
+                        steps.push(new Step(pairOfStepToRevert.getRevertedPair(), true, partialOrder.getWRelation(), partialOrder.getW1Relation()));
                         break;
                     } catch (SymmetricRelationException ex) {
-                        log.error("continue iteration");
-                        // continue iteration
+                        log.error("Reverted pair violates antisymmetry, continue rolling back");
                     }
                 }
             }
@@ -128,7 +150,7 @@ public class AutomataOrderingService implements IAutomataOrderingService {
         return new Order(wRelation, w1Relation, isReverted);
     }
 
-    private <T extends Comparable<T>> void mergeRelations(Set<Pair<T>> wRelation, Set<Pair<T>> transitionOrbit) throws SymmetricRelationException {
+    private <T extends Orderable> void mergeRelations(Set<Pair<T>> wRelation, Set<Pair<T>> transitionOrbit) throws SymmetricRelationException {
         for (Pair<T> pair : transitionOrbit) {
             if (wRelation.contains(pair.getRevertedPair())) {
                 throw new SymmetricRelationException("Can't merge relations as found symmetric pair for " + pair);
@@ -151,16 +173,17 @@ public class AutomataOrderingService implements IAutomataOrderingService {
                 .collect(Collectors.toList());
     }
 
-    private class Step {
-        private Pair<State> currentPair;
-        private boolean isReverted;
-        private Set<Pair<State>> wRelation;
-        private Set<Pair<OutputSignal>> w1Relation;
+    private static class Step {
+        private final Pair<State> currentPair;
+        private final boolean isReverted;
+        private final Set<Pair<State>> wRelation;
+        private final Set<Pair<OutputSignal>> w1Relation;
 
         public Step(Set<Pair<State>> wRelation, Set<Pair<OutputSignal>> w1Relation) {
             this.wRelation = wRelation;
             this.w1Relation = w1Relation;
             this.currentPair = null;
+            this.isReverted = false;
         }
 
         public Step(Pair<State> currentPair, boolean isReverted, Set<Pair<State>> wRelation, Set<Pair<OutputSignal>> w1Relation) {
@@ -175,8 +198,8 @@ public class AutomataOrderingService implements IAutomataOrderingService {
             return "Step{" +
                     "currentPair=" + currentPair +
                     ", isReverted=" + isReverted +
-                    ", wRelation=" + wRelation +
-                    ", w1Relation=" + w1Relation +
+                    "\nw=" + wRelation +
+                    "\nw1=" + w1Relation +
                     '}';
         }
     }

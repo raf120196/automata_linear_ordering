@@ -11,6 +11,6 @@ public class Orbit {
 
     @Override
     public String toString() {
-        return "transitionOrbit: " + transitionOrbit + ", outputOrbit=" + outputOrbit;
+        return "o: " + transitionOrbit + ", o1=" + outputOrbit;
     }
 }

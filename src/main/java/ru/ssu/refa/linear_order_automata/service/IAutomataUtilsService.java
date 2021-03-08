@@ -20,9 +20,13 @@ public interface IAutomataUtilsService {
 
     Map<Pair<State>, Orbit> getOrbits(Automaton automaton, Collection<Pair<State>> allStatePairs) throws SymmetricRelationException;
 
-    <T extends Comparable<T>> Set<Pair<T>> getTransitiveClosure(Set<Pair<T>> relation, Collection<T> elements) throws SymmetricRelationException;
+    <T extends Orderable> Set<Pair<T>> getTransitiveClosure(Set<Pair<T>> relation, Collection<T> elements) throws SymmetricRelationException;
 
-    <T extends Comparable<T>> boolean isOrderConstructed(Set<Pair<T>> relation, int totalCount);
+    <T extends Orderable> boolean isOrderConstructed(Set<Pair<T>> relation, int totalCount);
 
-    <T extends Comparable<T>> Set<Pair<T>> revertRelation(Set<Pair<T>> relation);
+    <T extends Orderable> Set<Pair<T>> revertRelation(Set<Pair<T>> relation);
+
+    <T extends Orderable> Set<Pair<T>> doTopologicalSort(Set<Pair<T>> relation);
+
+    <T extends Orderable> List<T> findLinkage(Set<Pair<T>> order);
 }

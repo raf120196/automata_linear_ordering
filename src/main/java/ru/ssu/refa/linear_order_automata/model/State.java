@@ -3,7 +3,7 @@ package ru.ssu.refa.linear_order_automata.model;
 import lombok.Data;
 
 @Data
-public class State implements Comparable<State> {
+public class State implements Comparable<State>, Orderable {
     private final Integer label;
 
     @Override
