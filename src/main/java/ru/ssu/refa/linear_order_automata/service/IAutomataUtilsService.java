@@ -26,7 +26,7 @@ public interface IAutomataUtilsService {
 
     <T extends Orderable> Set<Pair<T>> revertRelation(Set<Pair<T>> relation);
 
-    <T extends Orderable> Set<Pair<T>> doTopologicalSort(Set<Pair<T>> relation);
-
     <T extends Orderable> List<T> findLinkage(Set<Pair<T>> order);
+
+    <T extends Orderable> Set<Pair<T>> doTopologicalSort(List<T> set, Set<Pair<T>> relation);
 }

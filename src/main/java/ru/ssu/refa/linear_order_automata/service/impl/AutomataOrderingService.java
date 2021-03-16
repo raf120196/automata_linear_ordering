@@ -63,11 +63,10 @@ public class AutomataOrderingService implements IAutomataOrderingService {
 
             // previousStep mayn't be null here, so we can skip an assertion
             if (automataUtilsService.isOrderConstructed(previousStep.wRelation, automaton.getStates().size())) {
-                Set<Pair<OutputSignal>> linearOrderOnOutputSignalSet = automataUtilsService.doTopologicalSort(previousStep.w1Relation);
-                LinearOrder linearOrder = new LinearOrder(previousStep.wRelation, linearOrderOnOutputSignalSet);
+                Set<Pair<OutputSignal>> lOrderOnOutputSet = automataUtilsService.doTopologicalSort(
+                        automaton.getOutputSignals(), previousStep.w1Relation);
+                LinearOrder linearOrder = new LinearOrder(previousStep.wRelation, lOrderOnOutputSet);
                 log.debug("orderAutomaton: result - {}", linearOrder);
-
-                List<State> linkage = automataUtilsService.findLinkage(previousStep.wRelation);
                 return linearOrder;
             }
 

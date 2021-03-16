@@ -84,6 +84,11 @@ public class AutomataUtilsService implements IAutomataUtilsService {
         return orbit;
     }
 
+    private boolean isPairFine(Pair<State> pair, Set<Pair<State>> orbit) {
+        return pair.getLeft() != null && pair.getRight() != null &&
+                !pair.getLeft().equals(pair.getRight()) && !orbit.contains(pair);
+    }
+
     @Override
     public Set<Pair<OutputSignal>> getOutputOrbit(Automaton automaton, Set<Pair<State>> transitionOrbit) throws SymmetricRelationException {
         log.debug("getOutputOrbit: transitionOrbit - {}", transitionOrbit);
@@ -137,11 +142,7 @@ public class AutomataUtilsService implements IAutomataUtilsService {
     public <T extends Orderable> Set<Pair<T>> getTransitiveClosure(Set<Pair<T>> relation, Collection<T> elements) throws SymmetricRelationException {
         log.debug("getTransitiveClosure: relation - {}, elements - {}", relation, elements);
 
-        Map<T, Set<T>> adjacencyMap = new HashMap<>();
-        for (Pair<T> pair : relation) {
-            adjacencyMap.computeIfAbsent(pair.getLeft(), v -> new HashSet<>());
-            adjacencyMap.get(pair.getLeft()).add(pair.getRight());
-        }
+        Map<T, Set<T>> adjacencyMap = createAdjacencyMap(relation);
         log.trace("adjacencyMap - {}", adjacencyMap);
 
         Map<T, Set<T>> transitiveClosureMap = new HashMap<>();
@@ -158,34 +159,6 @@ public class AutomataUtilsService implements IAutomataUtilsService {
 
         log.debug("getTransitiveClosure: relation - {}, result - {}", relation, transitivelyClosedSet);
         return transitivelyClosedSet;
-    }
-
-    @Override
-    public <T extends Orderable> boolean isOrderConstructed(Set<Pair<T>> relation, int totalCount) {
-        log.debug("isOrderConstructed: relation - {}, totalCount - {}", relation, totalCount);
-        return (totalCount * totalCount + totalCount) / 2 == relation.size();
-    }
-
-    @Override
-    public <T extends Orderable> Set<Pair<T>> revertRelation(Set<Pair<T>> relation) {
-        return relation.stream()
-                .map(Pair::getRevertedPair)
-                .collect(Collectors.toSet());
-    }
-
-    @Override
-    public <T extends Orderable> Set<Pair<T>> doTopologicalSort(Set<Pair<T>> relation) {
-        // todo: implement using DFS
-        return relation;
-    }
-
-    @Override
-    public <T extends Orderable> List<T> findLinkage(Set<Pair<T>> order) {
-        Map<T, List<Pair<T>>> orderMap = order.stream()
-                .collect(Collectors.groupingBy(Pair::getLeft));
-        return orderMap.keySet().stream()
-                .sorted(comparingInt(t -> orderMap.get(t).size()).reversed())
-                .collect(Collectors.toList());
     }
 
     private <T extends Orderable> void dfsTransitive(T from, T to,
@@ -205,9 +178,59 @@ public class AutomataUtilsService implements IAutomataUtilsService {
         }
     }
 
-    private boolean isPairFine(Pair<State> pair, Set<Pair<State>> orbit) {
-        return pair.getLeft() != null && pair.getRight() != null &&
-                !pair.getLeft().equals(pair.getRight()) && !orbit.contains(pair);
+    @Override
+    public <T extends Orderable> boolean isOrderConstructed(Set<Pair<T>> relation, int totalCount) {
+        log.debug("isOrderConstructed: relation - {}, totalCount - {}", relation, totalCount);
+        return (totalCount * totalCount + totalCount) / 2 == relation.size();
+    }
+
+    @Override
+    public <T extends Orderable> Set<Pair<T>> revertRelation(Set<Pair<T>> relation) {
+        return relation.stream()
+                .map(Pair::getRevertedPair)
+                .collect(Collectors.toSet());
+    }
+
+    @Override
+    public <T extends Orderable> List<T> findLinkage(Set<Pair<T>> order) {
+        Map<T, List<Pair<T>>> orderMap = order.stream()
+                .collect(Collectors.groupingBy(Pair::getLeft));
+        return orderMap.keySet().stream()
+                .sorted(comparingInt(t -> orderMap.get(t).size()).reversed())
+                .collect(Collectors.toList());
+    }
+
+    @Override
+    public <T extends Orderable> Set<Pair<T>> doTopologicalSort(List<T> set, Set<Pair<T>> relation) {
+        Map<T, Set<T>> adjacencyMap = createAdjacencyMap(relation);
+        Set<T> used = new HashSet<>();
+        List<T> linearOrder = new ArrayList<>();
+        for (T t : set) {
+            if (!used.contains(t)) {
+                dfsTopological(t, adjacencyMap, used, linearOrder);
+            }
+        }
+        Collections.reverse(linearOrder);
+
+        Set<Pair<T>> result = new HashSet<>();
+        for (int i = 0; i < linearOrder.size(); i++) {
+            for (int j = i; j < linearOrder.size(); j++) {
+                result.add(new Pair<>(linearOrder.get(i), linearOrder.get(j)));
+            }
+        }
+        return result;
+    }
+
+    private <T extends Orderable> void dfsTopological(T t, Map<T, Set<T>> adjacencyMap, Set<T> used, List<T> linearOrder) {
+        used.add(t);
+        if (adjacencyMap.containsKey(t)) {
+            for (T to : adjacencyMap.get(t)) {
+                if (!used.contains(to)) {
+                    dfsTopological(to, adjacencyMap, used, linearOrder);
+                }
+            }
+        }
+        linearOrder.add(t);
     }
 
     private void handleSymmetricPair(Pair<?> pair) throws SymmetricRelationException {
@@ -221,6 +244,15 @@ public class AutomataUtilsService implements IAutomataUtilsService {
         }
         log.error("Property of antisymmetry is violated. {}", message);
         throw new SymmetricRelationException(message);
+    }
+
+    private <T extends Orderable> Map<T, Set<T>> createAdjacencyMap(Set<Pair<T>> relation) {
+        Map<T, Set<T>> adjacencyMap = new HashMap<>();
+        for (Pair<T> pair : relation) {
+            adjacencyMap.computeIfAbsent(pair.getLeft(), v -> new HashSet<>());
+            adjacencyMap.get(pair.getLeft()).add(pair.getRight());
+        }
+        return adjacencyMap;
     }
 
     private interface ThrowingConsumer<T, E extends Exception> {
